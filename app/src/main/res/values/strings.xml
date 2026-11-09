@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">App Lock</string>
+    <string name="accessibility_service_label">App Lock</string>
+    <string name="accessibility_service_description">Detects when a protected application opens so App Lock can ask for your PIN. App Lock does not read, store, or collect the content of your screen.</string>
+</resources>

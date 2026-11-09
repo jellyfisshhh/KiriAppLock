@@ -1,0 +1,55 @@
+# App Lock — Agent Notes
+
+Single-module Android app (`:app`, package `com.example.applock`). Kotlin + Jetpack Compose + Material 3. No tests, no CI, no `opencode.json` in repo.
+
+## Commands
+
+```bash
+export JAVA_HOME=/home/jellyfish/toolchains/jdk-17.0.20.1+1
+export ANDROID_HOME=/home/jellyfish/toolchains/android-sdk
+G=/home/jellyfish/toolchains/gradle-8.13/bin/gradle
+$G :app:assembleDebug     # APK: app/build/outputs/apk/debug/app-debug.apk
+$G :app:lintDebug         # 0 errors expected; 7 pre-existing warnings
+A=$ANDROID_HOME/platform-tools/adb
+$A install -r app/build/outputs/apk/debug/app-debug.apk
+$A shell dumpsys window | grep -m1 mCurrentFocus   # focused activity
+/tmp/opencode/ui.sh                                  # UI dump (text + bounds)
+/tmp/opencode/digits.sh 0401                         # tap PIN digits via live layout
+$A shell uiautomator events                          # live accessibility events
+$A shell run-as com.example.applock cat shared_prefs/app_lock_settings.xml
+```
+
+## Architecture
+
+- `MainActivity` (singleTask) → `AppRoot`/`SettingsScreen`; `LockActivity` (singleTask, `taskAffinity=.lock`, `excludeFromRecents`) → `LockScreen`. Both share the process-wide `SettingsRepository` singleton.
+- `AppLockAccessibilityService` gates protected apps; usage access is only a fallback. Never `canRetrieveWindowContent`; never log PINs, keypad order, or package names from events.
+- `LockSessionManager` is the single source of truth: per-package session map (`package → authenticatedAt`), lock-overlay dedupe (`pendingLockPackage`/`lockScreenPackage`).
+- `data/AppSettings.kt` + `data/SettingsRepository.kt` persist all settings (`app_lock_settings` prefs).
+
+## Gotchas
+
+- Enforcement needs **both** accessibility service enabled *and* usage access. Force-stopping App Lock disables its accessibility service — re-enable without the UI:
+  ```bash
+  $A shell settings put secure enabled_accessibility_services \
+    'com.example.applock/com.example.applock.service.AppLockAccessibilityService:de.mm20.launcher2.release/de.mm20.launcher2.globalactions.LauncherAccessibilityService'
+  $A shell settings put secure accessibility_enabled 1
+  ```
+- Kvaesitso (`de.mm20.launcher2.release`) has its own accessibility service in the same list — always preserve it.
+- Keyboard/`uiautomator dump` can be stale immediately after app switches; wait ~2.5s and re-dump.
+- `adb shell input tap` drops taps at <0.4s spacing; `digits.sh` already sleeps 0.4s.
+- `com.reddit.frontpage` has alias `launcher.default` — launch with `am start -n com.reddit.frontpage/launcher.default` (MAIN launcher intent does not resolve). `com.google.android.googlequicksearchbox` has no launcher entry; use Calculator (`com.google.android.calculator`) for an unprotected-app test.
+- Scramble keypad uses `SecureRandom` per lock-screen session; Delete/Continue are fixed bottom-row. Never log order.
+
+## Relock semantics (current, after latest fix)
+
+- `IMMEDIATELY` = **lock when the protected app leaves the foreground** for any other real app (Home/other app counts). Screen-off also expires sessions for this policy. Delegate/non-app windows, Custom Tabs, internal activity changes, and system overlays never count as leaving.
+- `SCREEN_OFF` = survive app switches; relock only on screen-off.
+- Timed (1/5 min) = survive switches and screen-off; expire by session age.
+- Delegate frames (e.g. Settings → Google settings in `com.google.android.gms`): filtered by `isApplicationWindow` + `SYSTEM_SURFACE_PACKAGES`.
+- Custom Tabs: `*CustomTabActivity*` windows are ignored — they belong to the calling app's flow. Regular browser tabs *do* count as leaving.
+
+## Layout rules
+
+- Portrait: keypad pinned to bottom (header top). Short windows (<520dp) scroll instead of clamping.
+- Landscape: two columns; `keypadLeftInLandscape` (default off) swaps to keypad-left, prompt-right. Use `BoxWithConstraints` + `safeDrawingPadding()`. No forced orientation.
+- Verified bounds on test device: portrait last keypad row y≈2062; landscape standard keypad x≈1522–2102, left-handed x≈406–986 (1080×2400 @ 400dpi).
