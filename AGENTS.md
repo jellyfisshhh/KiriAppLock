@@ -50,7 +50,7 @@ Local helpers (not committed; may not exist in a fresh environment): `/tmp/openc
 - `uiautomator dump` can be stale right after app switches; wait ~2.5s and re-dump. `adb shell input tap` drops taps at <0.4s spacing.
 - `com.reddit.frontpage` has alias `launcher.default` — launch with `am start -n com.reddit.frontpage/launcher.default` (MAIN launcher intent does not resolve). `com.google.android.googlequicksearchbox` has no launcher entry; use Calculator (`com.google.android.calculator`) for an unprotected-app test.
 - `ui.sh` crashes on Reddit WebView nodes without `bounds` — fall back to `dumpsys window` there.
-- Scramble keypad seeds from `sessionKey`, which `LockActivity` always passes as `0`; re-locking the same package via `onNewIntent` retains the old order. On-device test showed identical order across two lock screens — do not treat it as fixed without changing `sessionKey`/recomposition.
+- Scramble keypad order is seeded per lock-screen session. `LockActivity` keeps an observable `keypadSession` (saved across rotation) and increments it on every `onNewIntent`; `LockScreen` keys its `rememberSaveable` state on it. Do not pass a constant `0` again or the keypad will not reshuffle on re-lock.
 
 ## Relock semantics
 

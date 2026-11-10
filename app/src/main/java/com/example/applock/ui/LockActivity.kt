@@ -8,8 +8,9 @@ import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.applock.data.SettingsRepository
@@ -25,9 +26,18 @@ class LockActivity : AppCompatActivity() {
     private lateinit var repository: SettingsRepository
     private var lockedPackage by mutableStateOf("")
 
+    /**
+     * Identifies the current lock-screen session. It changes every time the
+     * service asks for a new lock, which resets the entered digits, error
+     * message, biometric state and (with scramble enabled) the keypad order.
+     * Saved across configuration changes so rotation preserves them.
+     */
+    private var keypadSession by mutableIntStateOf(0)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        keypadSession = savedInstanceState?.getInt(KEY_KEYPAD_SESSION, 0) ?: 0
         lockedPackage = intent.getStringExtra(EXTRA_PACKAGE_NAME).orEmpty()
         if (lockedPackage.isBlank()) {
             finish()
@@ -46,7 +56,9 @@ class LockActivity : AppCompatActivity() {
 
         setContent {
             val settings by repository.settings.collectAsStateWithLifecycle()
-            var showDecoy by remember(lockedPackage) { mutableStateOf(false) }
+            var showDecoy by rememberSaveable(lockedPackage, keypadSession) {
+                mutableStateOf(false)
+            }
 
             fun allowThrough() {
                 LockSessionManager.authenticate(lockedPackage)
@@ -66,7 +78,7 @@ class LockActivity : AppCompatActivity() {
                     else -> LockScreen(
                         settings = settings,
                         repository = repository,
-                        sessionKey = 0,
+                        sessionKey = keypadSession,
                         onUnlocked = { allowThrough() },
                         onFakePin = {
                             val decoyPackage = settings.safeDecoyPackage(lockedPackage)
@@ -116,9 +128,23 @@ class LockActivity : AppCompatActivity() {
             next != lockedPackage -> {
                 LockSessionManager.onLockScreenHidden(lockedPackage)
                 lockedPackage = next
+                keypadSession++
+                LockSessionManager.onLockScreenShown(next)
+            }
+            else -> {
+                // The same app is being locked again (for example after
+                // returning from another application). Start a fresh lock
+                // screen so the keypad is reshuffled and no stale input
+                // survives from the previous attempt.
+                keypadSession++
                 LockSessionManager.onLockScreenShown(next)
             }
         }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putInt(KEY_KEYPAD_SESSION, keypadSession)
     }
 
     private fun leaveLockScreen() {
@@ -131,5 +157,6 @@ class LockActivity : AppCompatActivity() {
 
     companion object {
         const val EXTRA_PACKAGE_NAME = "com.example.applock.extra.LOCKED_PACKAGE"
+        private const val KEY_KEYPAD_SESSION = "keypad_session"
     }
 }
