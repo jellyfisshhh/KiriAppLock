@@ -1,6 +1,6 @@
-# App Lock — Agent Notes
+# KiriAppLock — Agent Notes
 
-Single-module Android app (`:app`, package `com.example.applock`). Kotlin + Jetpack Compose + Material 3. No tests, no CI, no `opencode.json` in repo.
+Single-module Android app (`:app`, package `com.example.applock`). Kotlin + Jetpack Compose + Material 3. No tests, no CI, no `opencode.json` in repo. Public repo: https://github.com/jellyfisshhh/KiriAppLock (no LICENSE).
 
 ## Commands
 
@@ -8,39 +8,51 @@ Single-module Android app (`:app`, package `com.example.applock`). Kotlin + Jetp
 export JAVA_HOME=/home/jellyfish/toolchains/jdk-17.0.20.1+1
 export ANDROID_HOME=/home/jellyfish/toolchains/android-sdk
 G=/home/jellyfish/toolchains/gradle-8.13/bin/gradle
-$G :app:assembleDebug     # APK: app/build/outputs/apk/debug/app-debug.apk
-$G :app:lintDebug         # 0 errors expected; 7 pre-existing warnings
+$G :app:assembleDebug      # APK: app/build/outputs/apk/debug/app-debug.apk (debug-signed)
+$G :app:assembleRelease    # app-release-unsigned.apk — NO signingConfig, not installable
+$G :app:lintDebug          # 0 errors; 7 warnings, 1 info (pre-existing)
 A=$ANDROID_HOME/platform-tools/adb
 $A install -r app/build/outputs/apk/debug/app-debug.apk
 $A shell dumpsys window | grep -m1 mCurrentFocus   # focused activity
-/tmp/opencode/ui.sh                                  # UI dump (text + bounds)
-/tmp/opencode/digits.sh 0401                         # tap PIN digits via live layout
-$A shell uiautomator events                          # live accessibility events
+$A shell uiautomator events                        # live accessibility events
 $A shell run-as com.example.applock cat shared_prefs/app_lock_settings.xml
 ```
 
+Local helpers (not committed; may not exist in a fresh environment): `/tmp/opencode/ui.sh` dumps UI text+bounds and can tap by label; `/tmp/opencode/digits.sh <pin>` taps PIN digits using the live scrambled layout.
+
+## Device
+
+`ZA223G4P99` (`moto_g35_5G`), Android 15 / API 35, 1080×2400 @ 400dpi. Current on-device config: PIN `0401`, scramble ON, relock `IMMEDIATELY`, protected apps include Settings, Reddit, WhatsApp, Signal, Waterfox, Fossify Notes/Gallery/Filemanager, Discord; decoy = Aurora Store. Restore relock to `IMMEDIATELY` and theme to `SYSTEM` after testing.
+
 ## Architecture
 
-- `MainActivity` (singleTask) → `AppRoot`/`SettingsScreen`; `LockActivity` (singleTask, `taskAffinity=.lock`, `excludeFromRecents`) → `LockScreen`. Both share the process-wide `SettingsRepository` singleton.
+- `MainActivity` (singleTask) → `AppRoot`/`SettingsScreen`; its own in-app `AppSession` is separate from `LockSessionManager`.
+- `LockActivity` (singleTask, `taskAffinity=.lock`, `excludeFromRecents`) → `LockScreen`.
 - `AppLockAccessibilityService` gates protected apps; usage access is only a fallback. Never `canRetrieveWindowContent`; never log PINs, keypad order, or package names from events.
 - `LockSessionManager` is the single source of truth: per-package session map (`package → authenticatedAt`), lock-overlay dedupe (`pendingLockPackage`/`lockScreenPackage`).
 - `data/AppSettings.kt` + `data/SettingsRepository.kt` persist all settings (`app_lock_settings` prefs).
 
+## Release
+
+- `gh` is at `~/.local/bin/gh` (not on PATH). Git identity is set locally to `jellyfisshhh` / `345443604+jellyfisshhh@users.noreply.github.com`; do not change it globally.
+- `assembleRelease` has no `signingConfig` → `app-release-unsigned.apk`. The published `KiriAppLock-v1.0.apk` is the debug-signed build.
+- To cut a release: build the debug APK, copy it to a versioned name, then `gh release create vX.Y <apk> --title "vX.Y" --notes "..."`. Do not commit the APK (`.gitignore` excludes it).
+
 ## Gotchas
 
-- Enforcement needs **both** accessibility service enabled *and* usage access. Force-stopping App Lock disables its accessibility service — re-enable without the UI:
+- Enforcement needs **both** accessibility service enabled *and* usage access. Force-stopping App Lock removes it from `enabled_accessibility_services` — re-enable without the UI:
   ```bash
   $A shell settings put secure enabled_accessibility_services \
     'com.example.applock/com.example.applock.service.AppLockAccessibilityService:de.mm20.launcher2.release/de.mm20.launcher2.globalactions.LauncherAccessibilityService'
   $A shell settings put secure accessibility_enabled 1
   ```
 - Kvaesitso (`de.mm20.launcher2.release`) has its own accessibility service in the same list — always preserve it.
-- Keyboard/`uiautomator dump` can be stale immediately after app switches; wait ~2.5s and re-dump.
-- `adb shell input tap` drops taps at <0.4s spacing; `digits.sh` already sleeps 0.4s.
+- `uiautomator dump` can be stale right after app switches; wait ~2.5s and re-dump. `adb shell input tap` drops taps at <0.4s spacing.
 - `com.reddit.frontpage` has alias `launcher.default` — launch with `am start -n com.reddit.frontpage/launcher.default` (MAIN launcher intent does not resolve). `com.google.android.googlequicksearchbox` has no launcher entry; use Calculator (`com.google.android.calculator`) for an unprotected-app test.
-- Scramble keypad uses `SecureRandom` per lock-screen session; Delete/Continue are fixed bottom-row. Never log order.
+- `ui.sh` crashes on Reddit WebView nodes without `bounds` — fall back to `dumpsys window` there.
+- Scramble keypad seeds from `sessionKey`, which `LockActivity` always passes as `0`; re-locking the same package via `onNewIntent` retains the old order. On-device test showed identical order across two lock screens — do not treat it as fixed without changing `sessionKey`/recomposition.
 
-## Relock semantics (current, after latest fix)
+## Relock semantics
 
 - `IMMEDIATELY` = **lock when the protected app leaves the foreground** for any other real app (Home/other app counts). Screen-off also expires sessions for this policy. Delegate/non-app windows, Custom Tabs, internal activity changes, and system overlays never count as leaving.
 - `SCREEN_OFF` = survive app switches; relock only on screen-off.
@@ -52,4 +64,4 @@ $A shell run-as com.example.applock cat shared_prefs/app_lock_settings.xml
 
 - Portrait: keypad pinned to bottom (header top). Short windows (<520dp) scroll instead of clamping.
 - Landscape: two columns; `keypadLeftInLandscape` (default off) swaps to keypad-left, prompt-right. Use `BoxWithConstraints` + `safeDrawingPadding()`. No forced orientation.
-- Verified bounds on test device: portrait last keypad row y≈2062; landscape standard keypad x≈1522–2102, left-handed x≈406–986 (1080×2400 @ 400dpi).
+- Verified bounds on test device: portrait last keypad row y≈2062; landscape standard keypad x≈1522–2102, left-handed x≈406–986.
