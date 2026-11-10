@@ -49,7 +49,7 @@ Local helpers (not committed; may not exist in a fresh environment): `/tmp/openc
 - Kvaesitso (`de.mm20.launcher2.release`) has its own accessibility service in the same list — always preserve it.
 - `uiautomator dump` can be stale right after app switches; wait ~2.5s and re-dump. `adb shell input tap` drops taps at <0.4s spacing.
 - `com.reddit.frontpage` has alias `launcher.default` — launch with `am start -n com.reddit.frontpage/launcher.default` (MAIN launcher intent does not resolve). `com.google.android.googlequicksearchbox` has no launcher entry; use Calculator (`com.google.android.calculator`) for an unprotected-app test.
-- `ui.sh` crashes on Reddit WebView nodes without `bounds` — fall back to `dumpsys window` there.
+- `ui.sh` skips nodes without `bounds` (Reddit WebView), so its dump may be sparse there — fall back to `dumpsys window` for focus.
 - Scramble keypad order is seeded per lock-screen session. `LockActivity` keeps an observable `keypadSession` (saved across rotation) and increments it on every `onNewIntent`; `LockScreen` keys its `rememberSaveable` state on it. Do not pass a constant `0` again or the keypad will not reshuffle on re-lock.
 
 ## Relock semantics
