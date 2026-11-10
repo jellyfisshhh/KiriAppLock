@@ -4,7 +4,7 @@ A private, on-device Android app lock built with Kotlin and Jetpack Compose.
 
 ## Download
 
-Get the latest APK from [Releases](https://github.com/jellyfisshhh/KiriAppLock/releases) (`KiriAppLock-v1.0.apk`), install it, and grant Usage access + the App Lock accessibility service on first launch.
+Get the latest APK from [Releases](https://github.com/jellyfisshhh/KiriAppLock/releases) (`KiriAppLock-v1.1.apk`), install it, and grant Usage access + the App Lock accessibility service on first launch.
 
 > Initial releases are debug-signed for sideloading; production signing will be added separately.
 
